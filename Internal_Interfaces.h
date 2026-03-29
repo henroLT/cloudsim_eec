@@ -8,13 +8,10 @@
 #ifndef Internal_Interfaces_h
 #define Internal_Interfaces_h
 
-#include <string>
-#include <vector>
-
 #include "SimTypes.h"
 
 // CPU Interface
-extern CPUId_t AddCPU(CPUType_t cpu, vector<unsigned>cpu_dynamic, vector<unsigned> cpu_static, vector<unsigned> performance, bool gpu_flag);
+extern CPUId_t AddCPU(CPUType_t cpu, std::vector<unsigned>cpu_dynamic, std::vector<unsigned> cpu_static, std::vector<unsigned> performance, bool gpu_flag);
 extern CPUType_t CPU_GetType(CPUId_t cpu_id);
 extern long long GetConsumedEnergy(CPUId_t cpu_id);
 void CPU_AbortTask(CPUId_t cpu_id);
@@ -22,11 +19,11 @@ Time_t CPU_RunTask(CPUId_t cpu_id, TaskId_t task_id);
 void CPU_StopTask(CPUId_t cpu_id);
 
 // Initializer interface
-extern void Init(string filename);
+extern void Init(std::string filename);
 
 // Internal Machine Interface
-extern MachineId_t Machine_Add(unsigned memory, vector<unsigned> machine_power);
-extern void Machine_Add(u_int mem, u_int cores, vector<u_int> & s_states, vector<u_int> & c_states, vector<u_int> & p_states, vector<u_int> & mips, bool gpu, CPUType_t cpu);
+extern MachineId_t Machine_Add(unsigned memory, std::vector<unsigned> machine_power);
+extern void Machine_Add(u_int mem, u_int cores, std::vector<u_int> & s_states, std::vector<u_int> & c_states, std::vector<u_int> & p_states, std::vector<u_int> & mips, bool gpu, CPUType_t cpu);
 extern void Machine_AttachCPU(MachineId_t machine_id, CPUId_t cpu_id);
 extern void Machine_AttachVM(MachineId_t machine_id, VMId_t vm_id);
 extern void Machine_CompleteTask(MachineId_t machine_id, unsigned core_id);

@@ -5,13 +5,11 @@
 //  Created by ELMOOTAZBELLAH ELNOZAHY on 11/3/24.
 //
 
-#ifndef SimTypes_h
-#define SimTypes_h
+#pragma once
 
-#include <iostream>
+#include <cstdint>
 #include <vector>
-
-using namespace std;
+#include <string>
 
 typedef uint64_t Time_t;          // Time is computed in microseconds
 typedef uint64_t EventId_t;
@@ -95,10 +93,10 @@ typedef struct {
     unsigned active_vms;                    // Number of virtual machines that are attached to this machine
     bool gpus;                              // True if the processors are equipped with a GPU, false otherwise
     uint64_t energy_consumed;               // How much energy has been consumed so far
-    vector<unsigned> performance;           // The MIPS ratings for the CPUs at different p-state
-    vector<unsigned> c_states;              // Power consumption under different C states
-    vector<unsigned> p_states;              // Power consumption for cores at different P states. Valid only when C-state is C0.
-    vector<unsigned> s_states;              // Machine power consumption under different S states
+    std::vector<unsigned> performance;      // The MIPS ratings for the CPUs at different p-state
+    std::vector<unsigned> c_states;         // Power consumption under different C states
+    std::vector<unsigned> p_states;         // Power consumption for cores at different P states. Valid only when C-state is C0.
+    std::vector<unsigned> s_states;         // Machine power consumption under different S states
     MachineState_t s_state;                 // The current S state of the machine
     CPUPerformance_t p_state;               // The current P state of the CPUs (all CPUs are set to the same P state to simplify scheduling
     MachineId_t machine_id;                 // The identifier of the machine
@@ -125,11 +123,9 @@ typedef struct {
 } TaskInfo_t;
 
 typedef struct {
-    vector<TaskId_t> active_tasks;
+    std::vector<TaskId_t> active_tasks;
     CPUType_t cpu;
     MachineId_t machine_id;
     VMId_t vm_id;
     VMType_t vm_type;
 } VMInfo_t;
-
-#endif /* SimTypes_h */
