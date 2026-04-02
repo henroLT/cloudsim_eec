@@ -19,6 +19,7 @@ public:
     void PeriodicCheck(Time_t now);
     void Shutdown(Time_t now);
     void TaskComplete(Time_t now, TaskId_t task_id);
+    void StateChangeComplete(Time_t time, MachineId_t machine_id);
 
 private:
 
@@ -37,9 +38,5 @@ private:
 
     std::unordered_set<MachineId_t>   waking_machines;
     std::unordered_set<VMId_t>        migrating_vms;
-
-    MachineId_t getAvailableMachine(CPUType_t cpu);
-    VMId_t      getOrCreateVM(MachineId_t machine, VMType_t vm_type, CPUType_t cpu);
-    void        wakeMachine(MachineId_t machine);
 };
 
