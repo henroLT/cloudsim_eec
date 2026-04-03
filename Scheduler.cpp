@@ -350,3 +350,5 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     SchedulerInstance.StateChangeComplete(time, machine_id);
 }
+
+//
