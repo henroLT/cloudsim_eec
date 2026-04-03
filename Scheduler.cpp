@@ -9,9 +9,6 @@
 #include "Scheduler.hpp"
 #include <string>
 
-// ------------------------------------------------------------
-// Scheduler Initialization
-// ------------------------------------------------------------
 void Scheduler::Init() {
     unsigned total = Machine_GetTotal();
 
@@ -31,33 +28,25 @@ void Scheduler::Init() {
         machines_by_cpu[cpu].push_back(cur);
         machine_states[cur] = MachineState_t::S0;
 
-        unsigned num_cores = Machine_GetInfo(cur).num_cpus;
-        for (unsigned core = 0; core < num_cores; ++core) {
-            Machine_SetCorePerformance(cur, core, P0);
-        }
     }
 
-    // Initialize round-robin pointer per CPU type
+    // Init rr
     for (auto& entry : machines_by_cpu) {
         rr_index[entry.first] = 0;
     }
 }
 
-// ------------------------------------------------------------
-// Helper: Can this machine host this task?
-// ------------------------------------------------------------
+
 bool Scheduler::CanHostTask(MachineId_t m_id,
                             const TaskInfo_t& info,
                             VMId_t& target_vm,
                             bool& needs_new_vm) {
     MachineInfo_t m_info = Machine_GetInfo(m_id);
 
-    // Skip sleeping or waking machines
     if (m_info.s_state == S5 || waking_machines.count(m_id)) {
         return false;
     }
 
-    // Skip if task requires GPU and machine doesn't have one
     if (info.gpu_capable && !m_info.gpus) {
         return false;
     }
@@ -65,7 +54,6 @@ bool Scheduler::CanHostTask(MachineId_t m_id,
     target_vm = 0;
     needs_new_vm = true;
 
-    // Try to reuse an existing VM of the correct type
     for (VMId_t vm_id : vms_on_machine[m_id]) {
         if (vm_types[vm_id] == info.required_vm) {
             target_vm = vm_id;
@@ -84,17 +72,12 @@ bool Scheduler::CanHostTask(MachineId_t m_id,
     return free_memory >= required_memory;
 }
 
-// ------------------------------------------------------------
-// Migration Complete
-// ------------------------------------------------------------
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     (void)time;
     migrating_vms.erase(vm_id);
 }
 
-// ------------------------------------------------------------
-// New Task Arrival
-// ------------------------------------------------------------
+
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     (void)now;
 
@@ -115,9 +98,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     VMId_t target_vm = 0;
     bool needs_new_vm = false;
 
-    // -------------------------------
-    // ROUND ROBIN SEARCH
-    // -------------------------------
+    // RR
     do {
         MachineId_t m_id = candidate_machines[selected_index];
 
@@ -136,9 +117,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
 
     } while (selected_index != start_index);
 
-    // -------------------------------
-    // ASSIGN TASK IF MACHINE FOUND
-    // -------------------------------
+    // Assign
     if (machine_found) {
         if (needs_new_vm) {
             target_vm = VM_Create(info.required_vm, info.required_cpu);
@@ -156,9 +135,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         return;
     }
 
-    // -------------------------------
-    // WAKE-UP PASS
-    // -------------------------------
+    // Wake machine
     for (MachineId_t m_id : candidate_machines) {
         MachineInfo_t m_info = Machine_GetInfo(m_id);
 
@@ -183,17 +160,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
               std::to_string(task_id), 0);
 }
 
-// ------------------------------------------------------------
-// Periodic Check
-// ------------------------------------------------------------
-void Scheduler::PeriodicCheck(Time_t now) {
-    (void)now;
-    // Optional future monitoring / consolidation logic
-}
 
-// ------------------------------------------------------------
-// Shutdown
-// ------------------------------------------------------------
+void Scheduler::PeriodicCheck(Time_t now) { (void)now; }
+
 void Scheduler::Shutdown(Time_t time) {
     (void)time;
 
@@ -205,9 +174,7 @@ void Scheduler::Shutdown(Time_t time) {
     }
 }
 
-// ------------------------------------------------------------
-// Task Completion
-// ------------------------------------------------------------
+
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     (void)task_id;
 
@@ -240,9 +207,8 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
               std::to_string(now), 4);
 }
 
-// ------------------------------------------------------------
-// Machine Wake-Up Completion
-// ------------------------------------------------------------
+
+
 void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
     (void)time;
 
@@ -287,9 +253,7 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
     tasks.clear();
 }
 
-// ------------------------------------------------------------
-// Public Interface
-// ------------------------------------------------------------
+
 static Scheduler SchedulerInstance;
 
 void InitScheduler() {
@@ -321,11 +285,7 @@ void MigrationDone(Time_t time, VMId_t vm_id) {
     SchedulerInstance.MigrationComplete(time, vm_id);
 }
 
-void SchedulerCheck(Time_t time) {
-    // Optional periodic scheduler hook
-    // SchedulerInstance.PeriodicCheck(time);
-    (void)time;
-}
+void SchedulerCheck(Time_t time) { (void)time; }
 
 void SimulationComplete(Time_t time) {
     printf("SLA violation report\n");
@@ -344,11 +304,8 @@ void SimulationComplete(Time_t time) {
 void SLAWarning(Time_t time, TaskId_t task_id) {
     (void)time;
     (void)task_id;
-    // Optional SLA reaction logic
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     SchedulerInstance.StateChangeComplete(time, machine_id);
 }
-
-//
