@@ -5,7 +5,8 @@
 //  Created by ELMOOTAZBELLAH ELNOZAHY on 11/3/24.
 //
 
-#pragma once
+#ifndef Interfaces_h
+#define Interfaces_h
 
 // This header defines the public interfaces between the various modules. We have the following modules:
 // Debugging (messages and exceptions)
@@ -14,13 +15,16 @@
 // Tasks
 // VM (virtual machines)
 
+#include <string>
+#include <stdexcept>
+
 #include "SimTypes.h"
 
 // Debugging Interface
-extern void             SimOutput(std::string msg, unsigned verbose_level);
-extern void             ThrowException(std::string err_msg);
-extern void             ThrowException(std::string err_msg, std::string further_input);
-extern void             ThrowException(std::string err_msg, unsigned further_input);
+extern void             SimOutput(string msg, unsigned verbose_level);
+extern void             ThrowException(string err_msg);
+extern void             ThrowException(string err_msg, string further_input);
+extern void             ThrowException(string err_msg, unsigned further_input);
 
 // Machine Interface
 extern CPUType_t        Machine_GetCPUType(MachineId_t machine_id);
@@ -69,3 +73,5 @@ extern VMInfo_t         VM_GetInfo(VMId_t vm_id);
 extern void             VM_Migrate(VMId_t vm_id, MachineId_t machine_id);
 extern void             VM_RemoveTask(VMId_t vm_id, TaskId_t task_id);
 extern void             VM_Shutdown(VMId_t vm_id);
+
+#endif /* Interfaces_h */
