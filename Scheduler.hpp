@@ -8,6 +8,7 @@
 #include "Interfaces.h"
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 
 class Scheduler {
@@ -38,5 +39,12 @@ private:
 
     std::unordered_set<MachineId_t>   waking_machines;
     std::unordered_set<VMId_t>        migrating_vms;
+    std::unordered_map<CPUType_t, size_t> rr_index;
+
+    // Helper function for machine eligibility
+    bool CanHostTask(MachineId_t m_id,
+                 const TaskInfo_t& info,
+                 VMId_t& target_vm,
+                 bool& needs_new_vm);
 };
 
