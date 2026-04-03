@@ -32,3 +32,12 @@ $(TARGET): $(OBJ)
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(TARGET)
+
+
+
+test:
+	@for t in tests/*; do \
+		echo ""; \
+		echo "$$(basename $$t)"; \
+		./simulator $$t; \
+	done
