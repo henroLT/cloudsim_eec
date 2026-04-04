@@ -6,18 +6,17 @@
 #include <algorithm>
 #include <string>
 
-// Cascading Sleep Timers
-static constexpr Time_t SLEEP_S0i1_AFTER     =  15'000'000;   // 15 s
-static constexpr Time_t SLEEP_S1_AFTER       =  60'000'000;   // 1 m
-static constexpr Time_t SLEEP_S2_AFTER       = 120'000'000;   // 2 m
-static constexpr Time_t SLEEP_S3_AFTER       = 300'000'000;   // 5 m
-static constexpr Time_t SLEEP_S4_AFTER       = 600'000'000;   // 10 m
-static constexpr Time_t SLEEP_S5_AFTER       = 900'000'000;   // 15 m
+static constexpr Time_t SLEEP_S0i1_AFTER     =  60'000'000;   // 1 min
+static constexpr Time_t SLEEP_S1_AFTER       = 180'000'000;   // 3 min
+static constexpr Time_t SLEEP_S2_AFTER       = 300'000'000;   // 5 min
+static constexpr Time_t SLEEP_S3_AFTER       = 600'000'000;   // 10 min
+static constexpr Time_t SLEEP_S4_AFTER       = 900'000'000;   // 15 min
+static constexpr Time_t SLEEP_S5_AFTER       = 1800'000'000;  // 30 min
 
-static constexpr double UNDERLOAD_THRESHOLD  = 0.20;  
 static constexpr double OVERLOAD_THRESHOLD   = 0.80;  
+static constexpr double CRAMMING_THRESHOLD   = 1.50;  
+static constexpr double UNDERLOAD_THRESHOLD  = 0.20;  
 static constexpr Time_t CONSOLIDATION_INTERVAL = 30'000'000; 
-
 
 static double GetUtil(const MachineInfo_t& info) {
     if (info.num_cpus == 0) return 0.0;
@@ -42,7 +41,6 @@ bool Scheduler::HasInboundMigration(MachineId_t m) const {
     return false;
 }
 
-
 void Scheduler::Init() {
     unsigned total = Machine_GetTotal();
     
@@ -60,7 +58,6 @@ void Scheduler::Init() {
         pending_memory[cur] = 0;
     }
 }
-
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     auto it = migrating_vms.find(vm_id);
@@ -83,8 +80,6 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     }
 }
 
-// Snooze Algorithm 2 — Underload relocation
-
 bool Scheduler::UnderloadRelocate(MachineId_t src_id, Time_t now) {
     auto& vms = vms_on_machine[src_id];
     if (vms.empty()) return false;
@@ -98,7 +93,7 @@ bool Scheduler::UnderloadRelocate(MachineId_t src_id, Time_t now) {
         VMInfo_t vi = VM_GetInfo(vm);
         bool sensitive = false;
         for (TaskId_t t : vi.active_tasks) {
-            if (GetTaskInfo(t).required_sla == SLA0) { sensitive = true; break; }
+            if (GetTaskInfo(t).required_sla == SLA0 || GetTaskInfo(t).required_sla == SLA1) { sensitive = true; break; }
         }
         if (!sensitive) candidates.push_back(vm);
     }
@@ -113,7 +108,6 @@ bool Scheduler::UnderloadRelocate(MachineId_t src_id, Time_t now) {
     for (MachineId_t m : machines_by_cpu[src_info.cpu]) {
         if (m == src_id) continue;
         MachineInfo_t mi = Machine_GetInfo(m);
-        // Exclude transitional machines from targets
         if (mi.s_state != S0 || waking_machines.count(m) || powering_down.count(m)) continue;
         if (HasInboundMigration(m)) continue;
         dsts.push_back(m);
@@ -153,7 +147,6 @@ bool Scheduler::UnderloadRelocate(MachineId_t src_id, Time_t now) {
     return true;
 }
 
-// Snooze Algorithm 3 — Sercon consolidation
 void Scheduler::Consolidate(Time_t now) {
     std::vector<MachineId_t> active;
     for (auto& [cpu, machines] : machines_by_cpu) {
@@ -230,7 +223,6 @@ void Scheduler::Consolidate(Time_t now) {
     }
 }
 
-
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     TaskInfo_t info = GetTaskInfo(task_id);
     const auto& candidates = machines_by_cpu[info.required_cpu];
@@ -240,10 +232,10 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     std::vector<MachineId_t> waking;
 
     unsigned mem_needed_base = info.required_memory; 
+    bool is_critical = (info.required_sla == SLA0 || info.required_sla == SLA1);
 
-    // Sort into operational categories
     for (MachineId_t m : candidates) {
-        if (powering_down.count(m)) continue; // Never touch machines going to sleep
+        if (powering_down.count(m)) continue; 
 
         MachineInfo_t mi = Machine_GetInfo(m);
         unsigned mem_needed = mem_needed_base + VM_MEMORY_OVERHEAD;
@@ -265,7 +257,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         else { sleeping.push_back(m); }
     }
 
-    // Sort active machines
     auto sort_active = [&](MachineId_t a, MachineId_t b) {
         MachineInfo_t miA = Machine_GetInfo(a);
         MachineInfo_t miB = Machine_GetInfo(b);
@@ -277,11 +268,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     };
     std::sort(active_S0.begin(), active_S0.end(), sort_active);
 
-    // Override Priorities
     Priority_t override_priority = info.priority;
-    if (info.required_sla == SLA0) override_priority = HIGH_PRIORITY;
-    else if (info.required_sla == SLA1) override_priority = MID_PRIORITY;
-    else if (info.required_sla == SLA2) override_priority = LOW_PRIORITY;
+    if (info.required_sla == SLA0 || info.required_sla == SLA1) override_priority = HIGH_PRIORITY;
+    else if (info.required_sla == SLA2) override_priority = MID_PRIORITY;
 
     auto attach_to_active = [&](MachineId_t m) {
         empty_since.erase(m);
@@ -297,7 +286,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             vm_types[found_vm] = info.required_vm;
         }
         VM_AddTask(found_vm, task_id, override_priority);
-        if (info.required_sla == SLA0 || info.required_sla == SLA1) {
+        if (is_critical) {
             unsigned nc = Machine_GetInfo(m).num_cpus;
             for (unsigned i = 0; i < nc; ++i) Machine_SetCorePerformance(m, i, P0);
         }
@@ -311,64 +300,85 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         pending_memory[m] += mem_needed_base + VM_MEMORY_OVERHEAD;
     };
 
-    // Phase 1: Optimal S0 (Guaranteed Free Core)
     for (MachineId_t m : active_S0) {
         if (GetUtil(Machine_GetInfo(m)) < 1.0) {
-            attach_to_active(m);
-            return;
+            attach_to_active(m); return;
         }
     }
 
-    // Phase 2: Shallow Sleepers (Instant/Fast Wake)
     MachineId_t best_shallow = MachineId_t(-1);
     MachineState_t best_shallow_state = S5;
     for (MachineId_t m : sleeping) {
         MachineInfo_t mi = Machine_GetInfo(m);
-        if (mi.s_state <= S1) {
+        if (mi.s_state <= S3) { 
             if (mi.s_state <= best_shallow_state) { 
-                best_shallow_state = mi.s_state;
-                best_shallow = m;
+                best_shallow_state = mi.s_state; best_shallow = m;
             }
         }
     }
-    if (best_shallow != MachineId_t(-1)) {
-        wake_machine(best_shallow);
-        return;
+    if (best_shallow != MachineId_t(-1)) { wake_machine(best_shallow); return; }
+
+    if (!is_critical) {
+        for (auto it = active_S0.rbegin(); it != active_S0.rend(); ++it) {
+            MachineId_t m = *it;
+            if (GetUtil(Machine_GetInfo(m)) < CRAMMING_THRESHOLD) {
+                attach_to_active(m); return;
+            }
+        }
     }
 
-    // Phase 3: Cram on S0 (Pick least utilized machine to minimize preemption overlap)
-    if (!active_S0.empty()) {
-        MachineId_t best_cram = active_S0.back(); 
-        attach_to_active(best_cram);
-        return;
-    }
-
-    // Phase 4: Piggyback on a waking machine
-    if (!waking.empty()) {
-        MachineId_t m = waking.front();
+    for (MachineId_t m : waking) {
+        MachineInfo_t mi = Machine_GetInfo(m);
+        unsigned projected_tasks = pending_tasks[m].size() + 1;
+        
+        if (is_critical && projected_tasks > mi.num_cpus) continue; 
+        if (!is_critical && projected_tasks > mi.num_cpus * CRAMMING_THRESHOLD) continue; 
+        
         pending_tasks[m].push_back(task_id);
         pending_memory[m] += mem_needed_base + VM_MEMORY_OVERHEAD;
         return;
     }
 
-    // Phase 5: Deep Sleepers (Desperation Wake)
     MachineId_t best_deep = MachineId_t(-1);
     MachineState_t best_deep_state = S5;
     for (MachineId_t m : sleeping) {
         MachineInfo_t mi = Machine_GetInfo(m);
         if (mi.s_state <= best_deep_state) { 
-            best_deep_state = mi.s_state;
-            best_deep = m;
+            best_deep_state = mi.s_state; best_deep = m;
         }
     }
-    if (best_deep != MachineId_t(-1)) {
-        wake_machine(best_deep);
+    if (best_deep != MachineId_t(-1)) { wake_machine(best_deep); return; }
+
+    std::vector<MachineId_t> all_viable;
+    all_viable.insert(all_viable.end(), active_S0.begin(), active_S0.end());
+    all_viable.insert(all_viable.end(), waking.begin(), waking.end());
+
+    if (!all_viable.empty()) {
+        MachineId_t best_desp = all_viable.front();
+        double min_load_factor = 999999.0;
+        
+        for (MachineId_t m : all_viable) {
+            MachineInfo_t mi = Machine_GetInfo(m);
+            unsigned current_load = mi.active_tasks + pending_tasks[m].size();
+            double load_factor = (double)current_load / (mi.num_cpus > 0 ? mi.num_cpus : 1);
+            
+            if (load_factor < min_load_factor) {
+                min_load_factor = load_factor;
+                best_desp = m;
+            }
+        }
+        
+        if (waking_machines.count(best_desp)) {
+            pending_tasks[best_desp].push_back(task_id);
+            pending_memory[best_desp] += mem_needed_base + VM_MEMORY_OVERHEAD;
+        } else {
+            attach_to_active(best_desp);
+        }
         return;
     }
 
     SimOutput("Snooze::NewTask(): CRITICAL - OUT OF MEMORY for task " + std::to_string(task_id), 0);
 }
-
 
 void Scheduler::PeriodicCheck(Time_t now) {
     auto it = empty_since.begin();
@@ -429,7 +439,6 @@ void Scheduler::PeriodicCheck(Time_t now) {
     }
 }
 
-
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     for (auto& [m_id, vms] : vms_on_machine) {
         auto it = vms.begin();
@@ -452,9 +461,8 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     }
 }
 
-
 void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
-    powering_down.erase(machine_id);
+    powering_down.erase(machine_id); 
 
     if (!waking_machines.count(machine_id)) return;
     if (Machine_GetInfo(machine_id).s_state != S0) return;
@@ -466,9 +474,8 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
         TaskInfo_t info = GetTaskInfo(task_id);
         
         Priority_t override_priority = info.priority;
-        if (info.required_sla == SLA0) override_priority = HIGH_PRIORITY;
-        else if (info.required_sla == SLA1) override_priority = MID_PRIORITY;
-        else if (info.required_sla == SLA2) override_priority = LOW_PRIORITY;
+        if (info.required_sla == SLA0 || info.required_sla == SLA1) override_priority = HIGH_PRIORITY;
+        else if (info.required_sla == SLA2) override_priority = MID_PRIORITY;
 
         VMId_t target_vm = 0;
         bool found = false;
@@ -495,14 +502,12 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
     pending_tasks[machine_id].clear();
 }
 
-
 void Scheduler::Shutdown(Time_t time) {
     std::unordered_set<VMId_t> shut;
     for (auto& [machine, vms] : vms_on_machine)
         for (VMId_t vm : vms)
             if (!shut.count(vm)) { VM_Shutdown(vm); shut.insert(vm); }
 }
-
 
 static Scheduler GlobalScheduler;
 
