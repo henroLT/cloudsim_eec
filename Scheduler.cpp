@@ -18,10 +18,7 @@ void Scheduler::Init() {
     for (unsigned i = 0; i < total; ++i) {
         MachineId_t cur = MachineId_t(i);
         machines_by_cpu[Machine_GetCPUType(cur)].push_back(cur);
-
-        unsigned num_cores = Machine_GetInfo(cur).num_cpus;
-        for (unsigned core = 0; core < num_cores; ++core)
-            Machine_SetCorePerformance(cur, core, P0);
+        empty_since[cur] = 0; 
     }
 }
 
@@ -43,7 +40,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
 
     for (MachineId_t m_id : candidate_machines) {
         MachineInfo_t m_info = Machine_GetInfo(m_id);
-        if (m_info.s_state == S5 || waking_machines.count(m_id)) continue;
+        
+        // Skip if machine is not fully awake or is currently waking up
+        if (m_info.s_state != S0 || waking_machines.count(m_id)) continue;
         if (info.gpu_capable && !m_info.gpus) continue;
         if (m_info.performance[0] < required_mips * 1.05) continue;
 
@@ -77,7 +76,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         min_load = 999999.0;
         for (MachineId_t m_id : candidate_machines) {
             MachineInfo_t m_info = Machine_GetInfo(m_id);
-            if (m_info.s_state == S5 || waking_machines.count(m_id)) continue;
+            
+            if (m_info.s_state != S0 || waking_machines.count(m_id)) continue;
             if (info.gpu_capable && !m_info.gpus) continue;
 
             bool found_existing_vm = false;
@@ -106,7 +106,11 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         }
     }
 
+    // If we found an active machine, assign the task
     if (machine_found) {
+        // Machine is receiving a task, so it is no longer empty
+        empty_since.erase(selected_machine); 
+        
         if (needs_new_vm) {
             target_vm = VM_Create(info.required_vm, info.required_cpu);
             VM_Attach(target_vm, selected_machine);
@@ -118,20 +122,26 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
 
         if (info.required_sla == SLA0 || info.required_sla == SLA1) {
             unsigned num_cores = Machine_GetInfo(selected_machine).num_cpus;
-            for (unsigned i = 0; i < num_cores; ++i)
+            for (unsigned i = 0; i < num_cores; ++i) {
                 Machine_SetCorePerformance(selected_machine, i, P0);
+            }
         }
         return;
     }
 
     for (MachineId_t m_id : candidate_machines) {
         MachineInfo_t m_info = Machine_GetInfo(m_id);
-        if (m_info.s_state != S5 || waking_machines.count(m_id)) continue;
+        
+        // Find a machine that is NOT S0 and NOT currently waking up
+        if (m_info.s_state == S0 || waking_machines.count(m_id)) continue;
         if (info.gpu_capable && !m_info.gpus) continue;
         if (m_info.memory_size < (info.required_memory + VM_MEMORY_OVERHEAD)) continue;
 
+        // Wake it up
         Machine_SetState(m_id, S0);
         waking_machines.insert(m_id);
+        sleeping_machines.erase(m_id);
+        empty_since.erase(m_id);
         pending_tasks[m_id].push_back(task_id);
         return;
     }
@@ -139,12 +149,29 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     SimOutput("Scheduler::NewTask(): CRITICAL - No machine can accommodate task " + std::to_string(task_id), 0);
 }
 
-void Scheduler::PeriodicCheck(Time_t now) {}
+void Scheduler::PeriodicCheck(Time_t now) {
+    auto it = empty_since.begin();
+    while (it != empty_since.end()) {
+        MachineId_t m_id = it->first;
+        Time_t idle_start = it->second;
+        
+        // If empty for 30 sec sleep
+        if (now - idle_start >= 30000000) { 
+            Machine_SetState(m_id, S3);
+            sleeping_machines.insert(m_id);
+            it = empty_since.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 void Scheduler::Shutdown(Time_t time) {
-    for (auto& [machine, vms] : vms_on_machine)
-        for (auto vm : vms)
+    for (auto& [machine, vms] : vms_on_machine) {
+        for (auto vm : vms) {
             VM_Shutdown(vm);
+        }
+    }
 }
 
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
@@ -160,6 +187,14 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
                 ++it;
             }
         }
+        
+        // If all VMs are cleared, tick
+        if (vms.empty() && !empty_since.count(m_id)) {
+            MachineInfo_t m_info = Machine_GetInfo(m_id);
+            if (m_info.s_state == S0) {
+                empty_since[m_id] = now;
+            }
+        }
     }
 }
 
@@ -168,6 +203,7 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
 
     waking_machines.erase(machine_id);
 
+    // Now that the machine is awake, process its pending tasks
     for (TaskId_t task_id : pending_tasks[machine_id]) {
         TaskInfo_t info = GetTaskInfo(task_id);
 
@@ -220,7 +256,9 @@ void MigrationDone(Time_t time, VMId_t vm_id) {
     Scheduler.MigrationComplete(time, vm_id);
 }
 
-void SchedulerCheck(Time_t time) {}
+void SchedulerCheck(Time_t time) {
+    Scheduler.PeriodicCheck(time); // Link the global check to the class method
+}
 
 void SimulationComplete(Time_t time) {
     printf("SLA violation report\n");
