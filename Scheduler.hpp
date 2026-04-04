@@ -39,6 +39,9 @@ private:
     std::unordered_set<MachineId_t>   waking_machines;
     std::deque<TaskId_t>  arrival_queue;
 
+    std::unordered_set<MachineId_t> sleeping_machines;
+    std::unordered_map<MachineId_t, Time_t, EnumHash> empty_since;
+
     void TryDispatch(Time_t now); 
 };
 

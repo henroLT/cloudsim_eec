@@ -22,7 +22,23 @@ void Scheduler::Init() {
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {}
-void Scheduler::PeriodicCheck(Time_t now) {}
+
+void Scheduler::PeriodicCheck(Time_t now) {
+    auto it = empty_since.begin();
+    while (it != empty_since.end()) {
+        MachineId_t m_id = it->first;
+        Time_t idle_start = it->second;
+        
+        // If empty for 30 sec sleep
+        if (now - idle_start >= 30000000) { 
+            Machine_SetState(m_id, S3);
+            sleeping_machines.insert(m_id);
+            it = empty_since.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     arrival_queue.push_back(task_id);
@@ -49,6 +65,10 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
             } else {
                 ++it;
             }
+        }
+        if (vms.empty() && !empty_since.count(m_id)) { 
+            MachineInfo_t m_info = Machine_GetInfo(m_id); 
+            if (m_info.s_state == S0) { empty_since[m_id] = now; } 
         }
     }
     TryDispatch(now);
@@ -81,7 +101,7 @@ void Scheduler::TryDispatch(Time_t now) {
 
         for (MachineId_t m_id : candidate_machines) {
             MachineInfo_t m_info = Machine_GetInfo(m_id);
-            if (m_info.s_state == S5 || waking_machines.count(m_id)) continue;
+            if (m_info.s_state == S3 || waking_machines.count(m_id)) continue;
             if (info.gpu_capable && !m_info.gpus) continue;
             if (m_info.performance[0] < required_mips * 1.05) continue;
 
@@ -115,7 +135,7 @@ void Scheduler::TryDispatch(Time_t now) {
             min_load = 999999.0;
             for (MachineId_t m_id : candidate_machines) {
                 MachineInfo_t m_info = Machine_GetInfo(m_id);
-                if (m_info.s_state == S5 || waking_machines.count(m_id)) continue;
+                if (m_info.s_state == S3 || waking_machines.count(m_id)) continue;
                 if (info.gpu_capable && !m_info.gpus) continue;
 
                 bool found_existing_vm = false;
@@ -145,6 +165,7 @@ void Scheduler::TryDispatch(Time_t now) {
         }
 
         if (machine_found) {
+            empty_since.erase(selected_machine);
             if (needs_new_vm) {
                 target_vm = VM_Create(info.required_vm, info.required_cpu);
                 VM_Attach(target_vm, selected_machine);
@@ -165,12 +186,14 @@ void Scheduler::TryDispatch(Time_t now) {
             bool woke = false;
             for (MachineId_t m_id : candidate_machines) {
                 MachineInfo_t m_info = Machine_GetInfo(m_id);
-                if (m_info.s_state != S5 || waking_machines.count(m_id)) continue;
+                if (m_info.s_state != S3 || waking_machines.count(m_id)) continue;
                 if (info.gpu_capable && !m_info.gpus) continue;
                 if (m_info.memory_size < (info.required_memory + VM_MEMORY_OVERHEAD)) continue;
 
                 Machine_SetState(m_id, S0);
                 waking_machines.insert(m_id);
+                sleeping_machines.erase(m_id);
+                empty_since.erase(m_id);
                 pending_tasks[m_id].push_back(task_id);
                 it = arrival_queue.erase(it);
                 woke = true;
@@ -183,13 +206,12 @@ void Scheduler::TryDispatch(Time_t now) {
 }
 
 void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id) {
-    if (!waking_machines.count(machine_id)) return;
-
     waking_machines.erase(machine_id);
+    sleeping_machines.erase(machine_id);
+    empty_since.erase(machine_id);
 
     for (TaskId_t task_id : pending_tasks[machine_id]) {
         TaskInfo_t info = GetTaskInfo(task_id);
-
         VMId_t target_vm = 0;
         bool found_existing_vm = false;
 
@@ -252,6 +274,8 @@ void SchedulerCheck(Time_t time) {
     //     :
     //     : "rax", "rdi", "rsi", "rdx"
     // );
+
+    Scheduler.PeriodicCheck(time);
 }
 
 void SimulationComplete(Time_t time) {
